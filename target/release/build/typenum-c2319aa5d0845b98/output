@@ -1,3 +1,0 @@
-cargo:rerun-if-changed=build/main.rs
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=C:\Users\lukas\Desktop\Repositories\unlucke\target\release\build\typenum-c2319aa5d0845b98\out\consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=C:\Users\lukas\Desktop\Repositories\unlucke\target\release\build\typenum-c2319aa5d0845b98\out\op.rs
