@@ -1,0 +1,13 @@
+cargo:rerun-if-env-changed=PROFILE
+cargo:rustc-link-search=native=C:\Users\lukas\Desktop\Repositories\unlucke\target\release\build\unlucke-d71e8db327234cee\out
+cargo:rustc-link-arg=/NODEFAULTLIB:libvcruntimed.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:vcruntime.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:vcruntimed.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:libcmtd.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:msvcrt.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:msvcrtd.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:libucrt.lib
+cargo:rustc-link-arg=/NODEFAULTLIB:libucrtd.lib
+cargo:rustc-link-arg=/DEFAULTLIB:libcmt.lib
+cargo:rustc-link-arg=/DEFAULTLIB:libvcruntime.lib
+cargo:rustc-link-arg=/DEFAULTLIB:ucrt.lib
