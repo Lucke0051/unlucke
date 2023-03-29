@@ -1,31 +1,79 @@
 #![allow(non_snake_case)]
 
 use chacha20poly1305::{
-    aead::{stream, KeyInit, OsRng},
-    Key, XChaCha20Poly1305,
+    aead::{stream, KeyInit},
+    XChaCha20Poly1305,
 };
-use rand::RngCore;
 use std::{
     env,
     fs::{self, metadata, File},
     io::{self, Read, Write},
-    thread,
 };
 
 static ENCRYPTED_EXTENSION: &str = ".ulck";
+static ENCRYPTED_EXTENSION_LENGTH: usize = ENCRYPTED_EXTENSION.len();
 
-fn runFile(sourceFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
-    if sourceFilePath == "" {
+fn runFile(encryptedFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
+    if encryptedFilePath == "" {
         return Ok(());
     }
 
-    if !sourceFilePath.ends_with(ENCRYPTED_EXTENSION) {
+    if !encryptedFilePath.ends_with(ENCRYPTED_EXTENSION) {
         return Ok(());
     }
 
-    let mut sourceFile = File::open(sourceFilePath)?;
+    let mut encryptedFile = File::open(encryptedFilePath)?;
 
-    println!("Decrypting file: {}", sourceFilePath);
+    println!("Decrypting file: {}", encryptedFilePath);
+
+    let mut nonce = [0u8; 19];
+    match encryptedFile.read_exact(&mut nonce) {
+        Ok(_) => (),
+        Err(_) => return Ok(()),
+    };
+
+    let aead = XChaCha20Poly1305::new(key.as_ref().into());
+    let mut stream_decryptor = stream::DecryptorBE32::from_aead(aead, nonce.as_ref().into());
+
+    const BUFFER_LEN: usize = 500 + 16;
+    let mut buffer = [0u8; BUFFER_LEN];
+
+    let mut destinationFilePath = encryptedFilePath.to_string();
+    destinationFilePath.truncate(destinationFilePath.len() - ENCRYPTED_EXTENSION_LENGTH);
+
+    let mut destinationFile = File::create(destinationFilePath)?;
+
+    loop {
+        let read_count = encryptedFile.read(&mut buffer)?;
+
+        if read_count == BUFFER_LEN {
+            let plaintext = stream_decryptor.decrypt_next(buffer.as_slice());
+
+            match plaintext {
+                Ok(plaintext) => {
+                    destinationFile.write(&plaintext)?;
+                }
+                Err(_) => break,
+            }
+        } else if read_count == 0 {
+            break;
+        } else {
+            let plaintext = stream_decryptor.decrypt_last(&buffer[..read_count]);
+
+            match plaintext {
+                Ok(plaintext) => {
+                    destinationFile.write(&plaintext)?;
+                }
+                Err(_) => break,
+            }
+
+            break;
+        }
+    }
+
+    println!("Decrypted file: {}", encryptedFilePath);
+
+    Ok(())
 }
 
 fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
@@ -50,7 +98,10 @@ fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
             }
         }
     } else {
-        runFile(&dirEntryPath, &key);
+        match runFile(&dirEntryPath, &key) {
+            Ok(_) => (),
+            Err(err) => println!("COuld not decrypt file: {} File: {}", err, dirEntryPath),
+        };
     }
 }
 
@@ -67,8 +118,7 @@ where
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let entryPath = args.first().unwrap();
+    let entryPath = env::current_dir().unwrap().to_str().unwrap().to_string();
 
     let mut keyPath: String = entryPath.clone();
     keyPath.push_str(r#"\unlucke.key"#);
@@ -80,7 +130,7 @@ fn main() {
 
     let mut keyFile = File::open(&keyPath).unwrap();
     let mut keyVec = Vec::new();
-    keyFile.read_to_end(&mut keyVec);
+    keyFile.read_to_end(&mut keyVec).unwrap();
 
     let key: [u8; 32] = vecToArray32(keyVec);
 
