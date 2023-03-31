@@ -13,7 +13,11 @@ use std::{
 static ENCRYPTED_EXTENSION: &str = ".ulck";
 static ENCRYPTED_EXTENSION_LENGTH: usize = ENCRYPTED_EXTENSION.len();
 
-fn runFile(encryptedFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
+fn runFile(
+    encryptedFilePath: &str,
+    key: &[u8; 32],
+    deleteEncryptedFiles: bool,
+) -> Result<(), io::Error> {
     if encryptedFilePath == "" {
         return Ok(());
     }
@@ -42,6 +46,7 @@ fn runFile(encryptedFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
     destinationFilePath.truncate(destinationFilePath.len() - ENCRYPTED_EXTENSION_LENGTH);
 
     let mut destinationFile = File::create(destinationFilePath)?;
+    let mut done = false;
 
     loop {
         let read_count = encryptedFile.read(&mut buffer)?;
@@ -67,16 +72,27 @@ fn runFile(encryptedFilePath: &str, key: &[u8; 32]) -> Result<(), io::Error> {
                 Err(_) => break,
             }
 
+            done = true;
             break;
         }
     }
 
-    println!("Decrypted file: {}", encryptedFilePath);
+    if done {
+        println!("Decrypted file: {}", encryptedFilePath);
+
+        if deleteEncryptedFiles {
+            drop(&encryptedFile);
+
+            fs::remove_file(&encryptedFilePath)?;
+        }
+    } else {
+        println!("Failed to decrypt file: {}", encryptedFilePath);
+    }
 
     Ok(())
 }
 
-fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
+fn runDirEntry(dirEntryPath: &str, key: &[u8; 32], deleteEncryptedFiles: bool) {
     let metadata = match metadata(dirEntryPath) {
         Ok(metadata) => metadata,
         Err(_) => return,
@@ -91,14 +107,14 @@ fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
         for dirEntry in dirEntries {
             match dirEntry {
                 Ok(dirEntry) => match dirEntry.path().to_str() {
-                    Some(path) => runDirEntry(&path, &key),
+                    Some(path) => runDirEntry(&path, &key, deleteEncryptedFiles),
                     None => (),
                 },
                 Err(_) => (),
             }
         }
     } else {
-        match runFile(&dirEntryPath, &key) {
+        match runFile(&dirEntryPath, &key, deleteEncryptedFiles) {
             Ok(_) => (),
             Err(err) => println!("Could not decrypt file: {} File: {}", err, dirEntryPath),
         };
@@ -118,6 +134,13 @@ where
 }
 
 fn main() {
+    let mut deleteEncryptedFiles = false;
+
+    let args: Vec<String> = env::args().collect();
+    if args.contains(&"-d".to_string()) {
+        deleteEncryptedFiles = true;
+    }
+
     let entryPath = env::current_dir().unwrap().to_str().unwrap().to_string();
 
     let mut keyPath: String = entryPath.clone();
@@ -138,7 +161,7 @@ fn main() {
     for dirEntry in dirEntries {
         match dirEntry {
             Ok(dirEntry) => match dirEntry.path().to_str() {
-                Some(path) => runDirEntry(&path, &key),
+                Some(path) => runDirEntry(&path, &key, deleteEncryptedFiles),
                 None => (),
             },
             Err(_) => (),

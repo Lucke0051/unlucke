@@ -95,7 +95,7 @@ fn runFile(sourceFilePath: &str, key: &[u8; 32]) {
         }
     }
 
-    drop(sourceFile);
+    drop(&sourceFile);
 
     fs::remove_file(sourceFilePath).unwrap();
 
