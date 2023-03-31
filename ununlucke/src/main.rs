@@ -100,7 +100,7 @@ fn runDirEntry(dirEntryPath: &str, key: &[u8; 32]) {
     } else {
         match runFile(&dirEntryPath, &key) {
             Ok(_) => (),
-            Err(err) => println!("COuld not decrypt file: {} File: {}", err, dirEntryPath),
+            Err(err) => println!("Could not decrypt file: {} File: {}", err, dirEntryPath),
         };
     }
 }
