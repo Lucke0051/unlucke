@@ -24,13 +24,16 @@ fn handleConnection(mut stream: TcpStream) {
     let bufReader = BufReader::new(&mut stream);
 
     let mut firstChecked = false;
+    let mut lineCount = 0;
 
     let data: Vec<String> = bufReader
         .lines()
         .map(|result| result.unwrap())
         .take_while(|line| {
             if firstChecked {
-                !line.is_empty()
+                lineCount += 1;
+
+                !line.is_empty() && lineCount < 3
             } else {
                 firstChecked = true;
                 line == ACCESS_KEY
